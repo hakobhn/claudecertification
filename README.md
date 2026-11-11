@@ -89,13 +89,18 @@ python agent.py "What is the population of Tokyo divided by the population of Pa
 python -m unittest -v test_agent      # offline, no API calls
 ```
 
-Java (JDK 21+ and Maven):
+Java (JDK 25+ and Maven):
 
 ```powershell
 cd agentLoopJava
 mvn -q compile exec:java
 mvn -q compile exec:java "-Dexec.args=What is the population of Tokyo divided by the population of Paris?"
 mvn test                               # offline, no API calls
+
+# Runnable jar (SDK included): built by mvn package
+mvn clean package
+java -jar target\agent-loop-java-1.0.0-all.jar
+java -jar target\agent-loop-java-1.0.0-all.jar "What is the population of Tokyo divided by the population of Paris?"
 ```
 
 Each run makes about three requests to `claude-opus-5-5` and costs a few cents.
