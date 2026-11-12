@@ -18,7 +18,10 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
- * The agentic loop (steps 2-4 and 6 of the exercise).
+ * The agentic loop (steps 2-4 and 6 of the exercise): the {@link Agent} implementation.
+ *
+ * <p>Collaborators: a {@link MessageSender} to call Claude and a {@link ToolRegistry}
+ * that supplies the tool definitions and runs the tools Claude asks for.
  *
  * <p>The loop is controlled ONLY by {@code stop_reason}:
  * <ul>
@@ -29,7 +32,7 @@ import java.util.stream.Collectors;
  * It never checks content types, never parses phrases like "I'm done", and the
  * iteration cap is only a safeguard against runaway agents.
  */
-public final class AgentLoop {
+public final class AgentLoop implements Agent {
 
     public static final String MODEL = "claude-opus-5-5";
     public static final long MAX_TOKENS = 16_000L;
@@ -37,18 +40,15 @@ public final class AgentLoop {
 
     static final Logger LOG = Logger.getLogger("agent");
 
-    /** Sends one request to Claude. In production this is client.messages()::create; tests pass a fake. */
-    @FunctionalInterface
-    public interface MessageSender {
-        Message send(MessageCreateParams params);
-    }
-
     private final MessageSender sender;
+    private final ToolRegistry tools;
 
-    public AgentLoop(MessageSender sender) {
+    public AgentLoop(MessageSender sender, ToolRegistry tools) {
         this.sender = sender;
+        this.tools = tools;
     }
 
+    @Override
     public String run(String userInput) {
         // The conversation history. The API keeps no memory between calls,
         // so the FULL history is sent on every iteration.
@@ -69,7 +69,7 @@ public final class AgentLoop {
                     .model(MODEL)
                     .maxTokens(MAX_TOKENS)
                     .messages(messages);
-            Tools.ALL.forEach(params::addTool);
+            tools.definitions().forEach(params::addTool);
             Message response = sender.send(params.build());
 
             StopReason stopReason = response.stopReason()
@@ -93,8 +93,8 @@ public final class AgentLoop {
                     ToolUseBlock toolUse = block.asToolUse();
 
                     Map<String, Object> input = toolUse._input().convert(new TypeReference<Map<String, Object>>() {});
-                    Tools.Result result = Tools.execute(toolUse.name(), input);
-                    LOG.info("  tool " + toolUse.name() + "(" + Tools.toJson(input) + ") -> " + result.content());
+                    ToolResult result = tools.execute(toolUse.name(), input);
+                    LOG.info("  tool " + toolUse.name() + "(" + Json.toJson(input) + ") -> " + result.content());
 
                     ToolResultBlockParam.Builder tr = ToolResultBlockParam.builder()
                             .toolUseId(toolUse.id())          // must match the tool_use block's id

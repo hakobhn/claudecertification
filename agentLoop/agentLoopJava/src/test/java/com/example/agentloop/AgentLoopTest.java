@@ -45,8 +45,14 @@ class AgentLoopTest {
         return "{\"type\":\"tool_use\",\"id\":\"" + id + "\",\"name\":\"" + name + "\",\"input\":" + inputJson + "}";
     }
 
+    private static final ToolRegistry TOOLS = DefaultToolRegistry.standard();
+
+    private static Agent agent(MessageSender sender) {
+        return new AgentLoop(sender, TOOLS);
+    }
+
     /** Returns scripted responses in order and records each request's messages as JSON. */
-    private static final class FakeSender implements AgentLoop.MessageSender {
+    private static final class FakeSender implements MessageSender {
         private final Iterator<Message> responses;
         final List<JsonNode> requests = new ArrayList<>();
 
@@ -65,11 +71,12 @@ class AgentLoopTest {
 
     @Test
     void toolsWork() {
-        assertTrue(Tools.calculator("(8849 - 6190) * 2").contains("\"result\":5318"));
-        assertTrue(Tools.webSearch("height of Everest").contains("8,849"));
-        assertEquals(-4.0, Calculator.evaluate("-2 ** 2"));
-        assertEquals(3.0, Calculator.evaluate("7 // 2"));
-        assertTrue(Tools.execute("calculator", Map.of("expression", "System.exit(0)")).isError());
+        ExpressionEvaluator calculator = new Calculator();
+        assertTrue(new CalculatorTool(calculator).execute(Map.of("expression", "(8849 - 6190) * 2")).contains("\"result\":5318"));
+        assertTrue(new WebSearchTool().execute(Map.of("query", "height of Everest")).contains("8,849"));
+        assertEquals(-4.0, calculator.evaluate("-2 ** 2"));
+        assertEquals(3.0, calculator.evaluate("7 // 2"));
+        assertTrue(TOOLS.execute("calculator", Map.of("expression", "System.exit(0)")).isError());
     }
 
     @Test
@@ -83,7 +90,7 @@ class AgentLoopTest {
                         toolUse("t3", "calculator", "{\"expression\":\"8849 - 6190\"}")),
                 response("end_turn", text("Everest is 2,659 m taller than Denali."))));
 
-        String out = new AgentLoop(fake).run("How much taller is Everest than Denali?");
+        String out = agent(fake).run("How much taller is Everest than Denali?");
 
         assertEquals("Everest is 2,659 m taller than Denali.", out);
         assertEquals(3, fake.requests.size()); // two tool iterations, then end_turn
@@ -108,7 +115,7 @@ class AgentLoopTest {
                 response("tool_use", toolUse("t1", "calculator", "{\"expression\":\"1/0\"}")),
                 response("end_turn", text("Division by zero is undefined."))));
 
-        new AgentLoop(fake).run("1/0?");
+        agent(fake).run("1/0?");
 
         JsonNode result = fake.requests.get(1).get(2).get("content").get(0);
         assertTrue(result.get("is_error").asBoolean());
@@ -131,7 +138,7 @@ class AgentLoopTest {
         };
         AgentLoop.LOG.addHandler(capture);
         try {
-            String out = new AgentLoop(fake).run("loop forever");
+            String out = agent(fake).run("loop forever");
             assertEquals(AgentLoop.MAX_ITERATIONS, fake.requests.size());
             assertTrue(out.contains("safety"));
             assertTrue(warnings.stream().anyMatch(r -> r.getMessage().contains("Safety cap")));
@@ -144,6 +151,6 @@ class AgentLoopTest {
     @ValueSource(strings = {"max_tokens", "refusal", "model_context_window_exceeded"})
     void otherStopReasonsAreNotTreatedAsDone(String reason) {
         FakeSender fake = new FakeSender(List.of(response(reason, text("partial"))));
-        assertThrows(IllegalStateException.class, () -> new AgentLoop(fake).run("q"));
+        assertThrows(IllegalStateException.class, () -> agent(fake).run("q"));
     }
 }

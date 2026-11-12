@@ -16,12 +16,21 @@ orchestration/
 └── orchestrationJava/
     ├── pom.xml              Maven (anthropic-java 3.8.0, JUnit 5, runnable -all.jar)
     └── src/main/java/com/example/orchestration/
-        ├── Coordinator.java  THE HUB (same steps as coordinator.py)
-        ├── Subagents.java    the two spokes + prompt builders
-        ├── Documents.java    internal document library
-        ├── Llm.java          interface: complete(system, prompt, schema)
-        ├── ClaudeLlm.java    real implementation on the Messages API
-        └── Main.java         entry point
+        │   (interface                 ← implementation)
+        ├── ResearchCoordinator  ← Coordinator               THE HUB: run(topic) (same steps as coordinator.py)
+        ├── TopicDecomposer      ← LlmTopicDecomposer        1. decompose into subtopics
+        ├── ResearchDelegator    ← ParallelResearchDelegator 2. send subtopics to the spokes, in parallel
+        ├── WebSearchAgent       ← LlmWebSearchAgent            spoke 1 + its prompt builder
+        ├── DocumentAnalysisAgent← LlmDocumentAnalysisAgent     spoke 2 + its prompt builder
+        ├── DocumentLibrary      ← InMemoryDocumentLibrary      internal documents
+        ├── CoverageEvaluator    ← LlmCoverageEvaluator      3. rate coverage, find gaps
+        ├── ReportWriter         ← LlmReportWriter           4. final report + coverage table
+        ├── MessageRouter        ← LoggingMessageRouter      every hub↔spoke message, in one place
+        ├── Llm                  ← ClaudeLlm                 one Claude call = one fresh conversation
+        ├── CoordinatorFactory.java  wires the implementations together (the only place that names them)
+        ├── Subtopic, SubtopicResearch, ResearchReport, Document   data types
+        ├── CoordinatorSupport.java  coordinator system prompt, JSON Schema builders, JSON parsing
+        └── Main.java                entry point
 ```
 
 ## Architecture
@@ -61,7 +70,7 @@ orchestration/
 |---|---|
 | **Hub-and-spoke**: all communication goes through the coordinator | `_route()` / `route()` logs every message; a test checks the coordinator is on every edge |
 | **Isolation**: subagents inherit nothing | every `LLM.complete` call is a new one-message conversation; the subagent system prompts never include the coordinator's |
-| **Explicit context passing** | `build_web_search_prompt` / `buildWebSearchPrompt` and the document-analysis equivalent |
+| **Explicit context passing** | `build_web_search_prompt` / `LlmWebSearchAgent.buildPrompt` and the document-analysis equivalent |
 | **No memory between invocations** | refinement rounds pass `prior_findings` back into the prompt |
 | 1. Dynamic subagent selection | document analysis only when `find_documents()` returns something |
 | 2. Scope partitioning | distinct subtopics, plus one source type per subagent (web vs. internal docs) |
@@ -105,7 +114,7 @@ breadth" in the prompt) and during evaluation (`missing_areas`).
 | Structured output | `output_config={"format": {"type": "json_schema", "schema": ...}}` | `OutputConfig.builder().format(JsonOutputFormat...)` |
 | JSON → objects | `json.loads` → dataclasses | Jackson → records (`Decomposition`, `Evaluation`) |
 | Parallel delegation | `ThreadPoolExecutor` | `Executors.newFixedThreadPool` |
-| Subagent context | keyword args to `build_*_prompt` | `WebSearchContext` / `DocumentAnalysisContext` records |
+| Subagent context | keyword args to `build_*_prompt` | `WebSearchAgent.Context` / `DocumentAnalysisAgent.Context` records |
 
 ## Running
 

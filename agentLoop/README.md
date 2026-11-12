@@ -13,10 +13,15 @@ AgenticExam/
     ├── pom.xml             Maven build (anthropic-java 3.8.0, JUnit 5)
     └── src/
         ├── main/java/com/example/agentloop/
-        │   ├── Main.java        entry point: builds the client, runs the agent
-        │   ├── AgentLoop.java   THE LOOP: stop_reason drives everything
-        │   ├── Tools.java       tool definitions (JSON Schema) + execution
-        │   └── Calculator.java  safe arithmetic parser used by the calculator tool
+        │   │   (interface             ← implementation)
+        │   ├── Agent                ← AgentLoop               THE LOOP: stop_reason drives everything
+        │   ├── MessageSender        ← AnthropicMessageSender  one Messages API call
+        │   ├── ToolRegistry         ← DefaultToolRegistry     tool definitions + run a tool by name
+        │   ├── AgentTool            ← CalculatorTool, WebSearchTool   one tool: definition + execution
+        │   ├── ExpressionEvaluator  ← Calculator              safe arithmetic parser used by the calculator tool
+        │   ├── ToolResult.java      tool_result content + is_error
+        │   ├── Json.java            JSON + input_schema helpers
+        │   └── Main.java            entry point: wires the implementations, runs the agent
         └── test/java/com/example/agentloop/
             └── AgentLoopTest.java   offline tests (fake sender)
 ```

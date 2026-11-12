@@ -26,7 +26,8 @@ public final class Main {
 
         AnthropicClient client = AnthropicOkHttpClient.fromEnv();
         try {
-            AgentLoop agent = new AgentLoop(params -> client.messages().create(params));
+            // Wiring: the agent depends only on the MessageSender and ToolRegistry interfaces.
+            Agent agent = new AgentLoop(new AnthropicMessageSender(client), DefaultToolRegistry.standard());
             System.out.println();
             System.out.println(agent.run(prompt));
         } finally {

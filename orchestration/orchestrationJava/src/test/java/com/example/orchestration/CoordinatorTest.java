@@ -1,7 +1,5 @@
 package com.example.orchestration;
 
-import com.example.orchestration.Coordinator.ResearchReport;
-import com.example.orchestration.Coordinator.SubtopicResearch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,10 +71,10 @@ class CoordinatorTest {
         @Override
         public synchronized String complete(String system, String prompt, Map<String, Object> schema) {
             calls.add(new Call(system, prompt, schema));
-            if (system.equals(Subagents.WEB_SEARCH_SYSTEM)) return "- web fact about " + subtopicOf(prompt);
-            if (system.equals(Subagents.DOCUMENT_ANALYSIS_SYSTEM)) return "- document fact";
-            if (schema == Coordinator.DECOMPOSE_SCHEMA) return decompositions.removeFirst();
-            if (schema == Coordinator.EVALUATE_SCHEMA) return evaluations.removeFirst();
+            if (system.equals(LlmWebSearchAgent.SYSTEM)) return "- web fact about " + subtopicOf(prompt);
+            if (system.equals(LlmDocumentAnalysisAgent.SYSTEM)) return "- document fact";
+            if (schema == LlmTopicDecomposer.SCHEMA) return decompositions.removeFirst();
+            if (schema == LlmCoverageEvaluator.SCHEMA) return evaluations.removeFirst();
             return "# Report\n" + SIX.stream().map(n -> "## " + n + "\ntext").collect(Collectors.joining("\n"));
         }
 
@@ -105,10 +103,10 @@ class CoordinatorTest {
     void narrowDecompositionIsRejectedAndRetried() {
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(List.of("Solar power", "Wind power")), subtopicsJson(SIX)),
                 List.of(allCovered(SIX)));
-        ResearchReport report = new Coordinator(llm).run("renewable energy technologies");
+        ResearchReport report = CoordinatorFactory.create(llm).run("renewable energy technologies");
 
         assertEquals(SIX, report.research().stream().map(r -> r.subtopic.name()).toList());
-        String retryPrompt = llm.calls.stream().filter(c -> c.schema() == Coordinator.DECOMPOSE_SCHEMA).toList().get(1).prompt();
+        String retryPrompt = llm.calls.stream().filter(c -> c.schema() == LlmTopicDecomposer.SCHEMA).toList().get(1).prompt();
         assertTrue(retryPrompt.contains("too narrow"));
     }
 
@@ -116,9 +114,9 @@ class CoordinatorTest {
     void missingRequiredCategoryIsSentBackToClaude() {
         List<String> five = SIX.subList(0, 5); // enough subtopics, but no fusion - the narrow-decomposition failure
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(five), subtopicsJson(SIX)), List.of(allCovered(SIX)));
-        ResearchReport report = new Coordinator(llm).run("renewable energy technologies", Main.REQUIRED_FOR_TEST);
+        ResearchReport report = CoordinatorFactory.create(llm).run("renewable energy technologies", Main.REQUIRED_FOR_TEST);
 
-        String retryPrompt = llm.calls.stream().filter(c -> c.schema() == Coordinator.DECOMPOSE_SCHEMA).toList().get(1).prompt();
+        String retryPrompt = llm.calls.stream().filter(c -> c.schema() == LlmTopicDecomposer.SCHEMA).toList().get(1).prompt();
         assertTrue(retryPrompt.contains("does not cover these required categories: fusion"));
         assertTrue(report.research().stream().anyMatch(r -> r.subtopic.name().equals("Nuclear fusion")));
     }
@@ -129,33 +127,33 @@ class CoordinatorTest {
         List<String> withFusion = new ArrayList<>(five);
         withFusion.add("Fusion");
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(five), subtopicsJson(five)), List.of(allCovered(withFusion)));
-        ResearchReport report = new Coordinator(llm).run("renewable energy technologies", Main.REQUIRED_FOR_TEST);
+        ResearchReport report = CoordinatorFactory.create(llm).run("renewable energy technologies", Main.REQUIRED_FOR_TEST);
 
         assertEquals(withFusion, report.research().stream().map(r -> r.subtopic.name()).toList());
-        long fusionCalls = llm.promptsFor(Subagents.WEB_SEARCH_SYSTEM).stream().filter(p -> p.contains("subtopic: Fusion")).count();
+        long fusionCalls = llm.promptsFor(LlmWebSearchAgent.SYSTEM).stream().filter(p -> p.contains("subtopic: Fusion")).count();
         assertEquals(1, fusionCalls); // it really was researched
     }
 
     @Test
     void subagentsAreIsolatedAndGetExplicitContext() {
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(SIX)), List.of(allCovered(SIX)));
-        new Coordinator(llm).run("renewable energy technologies");
+        CoordinatorFactory.create(llm).run("renewable energy technologies");
 
-        List<String> subagentPrompts = new ArrayList<>(llm.promptsFor(Subagents.WEB_SEARCH_SYSTEM));
-        subagentPrompts.addAll(llm.promptsFor(Subagents.DOCUMENT_ANALYSIS_SYSTEM));
+        List<String> subagentPrompts = new ArrayList<>(llm.promptsFor(LlmWebSearchAgent.SYSTEM));
+        subagentPrompts.addAll(llm.promptsFor(LlmDocumentAnalysisAgent.SYSTEM));
         for (String p : subagentPrompts) {
-            assertFalse(p.contains(Coordinator.COORDINATOR_SYSTEM));   // no inherited coordinator prompt
+            assertFalse(p.contains(CoordinatorSupport.COORDINATOR_SYSTEM));   // no inherited coordinator prompt
             assertTrue(p.contains("Overall research topic: renewable energy technologies"));
             assertTrue(p.contains("Research goal:"));
         }
 
         // Each web search prompt mentions only its own subtopic, never another subagent's output.
-        String solar = llm.promptsFor(Subagents.WEB_SEARCH_SYSTEM).stream()
+        String solar = llm.promptsFor(LlmWebSearchAgent.SYSTEM).stream()
                 .filter(p -> p.contains("subtopic: Solar power")).findFirst().orElseThrow();
         assertFalse(solar.contains("web fact about Wind power"));
 
         // Document analysis receives the web findings - passed by the coordinator.
-        String geo = llm.promptsFor(Subagents.DOCUMENT_ANALYSIS_SYSTEM).stream()
+        String geo = llm.promptsFor(LlmDocumentAnalysisAgent.SYSTEM).stream()
                 .filter(p -> p.contains("subtopic: Geothermal")).findFirst().orElseThrow();
         assertTrue(geo.contains("web fact about Geothermal energy"));
         assertTrue(geo.contains("Geothermal Feasibility Study"));
@@ -164,12 +162,12 @@ class CoordinatorTest {
     @Test
     void documentAnalysisOnlyWhereDocumentsExist() {
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(SIX)), List.of(allCovered(SIX)));
-        ResearchReport report = new Coordinator(llm).run("renewable energy technologies");
+        ResearchReport report = CoordinatorFactory.create(llm).run("renewable energy technologies");
 
-        List<String> analysed = llm.promptsFor(Subagents.DOCUMENT_ANALYSIS_SYSTEM).stream()
+        List<String> analysed = llm.promptsFor(LlmDocumentAnalysisAgent.SYSTEM).stream()
                 .map(CoordinatorTest::subtopicOf).sorted().toList();
         assertEquals(List.of("Biomass energy", "Geothermal energy", "Solar power", "Wind power"), analysed);
-        assertEquals(6, llm.promptsFor(Subagents.WEB_SEARCH_SYSTEM).size());
+        assertEquals(6, llm.promptsFor(LlmWebSearchAgent.SYSTEM).size());
         assertEquals(1.0, report.coverage());
     }
 
@@ -182,11 +180,11 @@ class CoordinatorTest {
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(SIX)),
                 List.of(evaluationJson(first, List.of("Hydropower")), allCovered(withHydro)));
 
-        ResearchReport report = new Coordinator(llm).run("renewable energy technologies");
+        ResearchReport report = CoordinatorFactory.create(llm).run("renewable energy technologies");
 
         assertEquals(2, report.rounds());
         assertEquals(1.0, report.coverage());
-        List<String> web = llm.promptsFor(Subagents.WEB_SEARCH_SYSTEM);
+        List<String> web = llm.promptsFor(LlmWebSearchAgent.SYSTEM);
         assertEquals(8, web.size()); // 6 initial + tidal follow-up + new hydropower area
 
         String tidalFollowUp = web.stream().filter(p -> p.contains("Tidal") && p.contains("Gap the coordinator"))
@@ -200,21 +198,21 @@ class CoordinatorTest {
     void refinementStopsAtMaxRounds() {
         String neverDone = evaluationJson(statuses(SIX, "partial"), List.of());
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(SIX)), List.of(neverDone, neverDone, neverDone, neverDone));
-        ResearchReport report = new Coordinator(llm, 5, 3, 6).run("renewable energy technologies");
+        ResearchReport report = CoordinatorFactory.create(llm, 5, 3, 6).run("renewable energy technologies");
 
         assertEquals(3, report.rounds());
-        assertEquals(18, llm.promptsFor(Subagents.WEB_SEARCH_SYSTEM).size()); // 3 rounds x 6 subtopics
+        assertEquals(18, llm.promptsFor(LlmWebSearchAgent.SYSTEM).size()); // 3 rounds x 6 subtopics
         assertTrue(report.markdown().contains("Coverage: 0/6"));
     }
 
     @Test
     void allMessagesRouteThroughTheCoordinator() {
         FakeLlm llm = new FakeLlm(List.of(subtopicsJson(SIX)), List.of(allCovered(SIX)));
-        Coordinator coordinator = new Coordinator(llm);
+        ResearchCoordinator coordinator = CoordinatorFactory.create(llm);
         coordinator.run("renewable energy technologies");
 
-        assertFalse(coordinator.trace.isEmpty());
-        for (Coordinator.Route r : coordinator.trace) {
+        assertFalse(coordinator.trace().isEmpty());
+        for (MessageRouter.Route r : coordinator.trace()) {
             assertTrue(r.from().equals("coordinator") || r.to().equals("coordinator")); // no spoke-to-spoke
         }
     }
@@ -224,14 +222,14 @@ class CoordinatorTest {
         FakeLlm fake = new FakeLlm(List.of(subtopicsJson(SIX)), List.of(allCovered(SIX)));
         AtomicInteger failures = new AtomicInteger();
         Llm flaky = (system, prompt, schema) -> {
-            if (system.equals(Subagents.WEB_SEARCH_SYSTEM) && prompt.contains("Nuclear fusion")
+            if (system.equals(LlmWebSearchAgent.SYSTEM) && prompt.contains("Nuclear fusion")
                     && failures.getAndIncrement() < 1) {
                 throw new IllegalStateException("overloaded");
             }
             return fake.complete(system, prompt, schema);
         };
 
-        ResearchReport report = new Coordinator(flaky).run("renewable energy technologies");
+        ResearchReport report = CoordinatorFactory.create(flaky).run("renewable energy technologies");
         SubtopicResearch fusion = report.research().stream()
                 .filter(r -> r.subtopic.name().equals("Nuclear fusion")).findFirst().orElseThrow();
         assertEquals(1, fusion.findings.size());

@@ -30,8 +30,8 @@ public final class Main {
         try {
             boolean isExerciseTest = topic.equals(DEFAULT_TOPIC);
             // Step 6: the exercise's test case - the requester requires these six categories.
-            Coordinator.ResearchReport report = new Coordinator(new ClaudeLlm(client))
-                    .run(topic, isExerciseTest ? REQUIRED_FOR_TEST : List.of());
+            ResearchCoordinator coordinator = CoordinatorFactory.create(new ClaudeLlm(client));
+            ResearchReport report = coordinator.run(topic, isExerciseTest ? REQUIRED_FOR_TEST : List.of());
             System.out.println();
             System.out.println(report.markdown());
 

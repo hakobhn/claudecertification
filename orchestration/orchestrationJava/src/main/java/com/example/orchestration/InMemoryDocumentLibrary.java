@@ -5,22 +5,15 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * A small internal document library for the document-analysis subagent.
+ * {@link DocumentLibrary} held in memory.
  *
- * <p>Made-up memos from a fictional energy consultancy. Only some subtopics have
- * documents (nothing on tidal or fusion), so the coordinator invokes the
- * document-analysis subagent only where it can add something - "dynamic subagent
- * selection" from the lesson.
+ * <p>The default documents are made-up memos from a fictional energy consultancy. Only some
+ * subtopics have documents (nothing on tidal or fusion), so the coordinator invokes the
+ * document-analysis subagent only where it can add something - "dynamic subagent selection".
  */
-public final class Documents {
+public final class InMemoryDocumentLibrary implements DocumentLibrary {
 
-    private Documents() {
-    }
-
-    public record Document(String title, List<String> keywords, String text) {
-    }
-
-    public static final List<Document> ALL = List.of(
+    public static final List<Document> SAMPLE_DOCUMENTS = List.of(
             new Document("Q3 Solar Portfolio Review", List.of("solar", "photovoltaic", "pv"),
                     "Our 3 utility-scale PV sites averaged a 24% capacity factor in Q3. Module prices fell 18% "
                             + "year on year, but grid-connection queues now delay new sites by 2-4 years. Bifacial modules "
@@ -38,15 +31,27 @@ public final class Documents {
                             + "supply. Pellet prices are linked to freight costs and moved +/-30% in 18 months. Carbon "
                             + "accounting is contested unless feedstock comes from residues rather than whole trees."));
 
+    private final List<Document> documents;
+
+    /** A library holding {@link #SAMPLE_DOCUMENTS}. */
+    public InMemoryDocumentLibrary() {
+        this(SAMPLE_DOCUMENTS);
+    }
+
+    public InMemoryDocumentLibrary(List<Document> documents) {
+        this.documents = List.copyOf(documents);
+    }
+
     /**
      * Documents whose keywords appear as whole words in the subtopic NAME.
      *
      * <p>Matching on the name only keeps selection tight: a subtopic like "Off-grid energy access"
      * whose description merely mentions solar should not pull in the solar portfolio memo.
      */
-    public static List<Document> find(String subtopicName) {
+    @Override
+    public List<Document> find(String subtopicName) {
         String name = subtopicName.toLowerCase(Locale.ROOT);
-        return ALL.stream()
+        return documents.stream()
                 .filter(d -> d.keywords().stream()
                         .anyMatch(k -> Pattern.compile("\\b" + Pattern.quote(k) + "\\b").matcher(name).find()))
                 .toList();
